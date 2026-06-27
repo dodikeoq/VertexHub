@@ -1,0 +1,508 @@
+-- узел: meridian/vertexhub_core
+-- среда: Delta Executor (Luau Client Environment)
+-- параметры: Вертикальный UI, Анимация, Точечный ESP, Instant Steal
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local targetGui = gethui and gethui() or CoreGui
+
+-- Сброс активных сессий интерфейса
+if targetGui:FindFirstChild("VERTEXHUB_Terminal") then
+    targetGui["VERTEXHUB_Terminal"]:Destroy()
+end
+
+-- Единый реестр конфигурации систем
+local Config = {
+    InfJump = false,
+    LiteHit = false,
+    LaserCloak = false,
+    InstantSteal = false,
+    StealDelay = 0, -- Регулируется ползунком (0-5 секунд)
+    ESP_Players = false,
+    ESP_Brainrots = false,
+    ESP_Bases = false
+}
+
+local ESP_Cache = {
+    Players = {},
+    Brainrots = {},
+    Bases = {}
+}
+
+-- КОНТУРЫ АВТОМАТИЗАЦИИ СИСТЕМ ЖИЗНЕОБЕСПЕЧЕНИЯ И БОЯ
+
+-- 1. Стабилизированный Infinity Jump
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfJump then
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- Вспомогательная функция поиска ближайшего противника
+local function GetClosestPlayer(maxDistance)
+    local closestPlayer = nil
+    local shortestDistance = maxDistance
+    local localChar = LocalPlayer.Character
+    local localHRP = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    if not localHRP then return nil end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
+            local targetHum = player.Character:FindFirstChildOfClass("Humanoid")
+            if targetHRP and targetHum and targetHum.Health > 0 then
+                local distance = (localHRP.Position - targetHRP.Position).Magnitude
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    closestPlayer = player
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+-- 2. Физический импульс отбрасывания (lLte-hit)
+RunService.Heartbeat:Connect(function()
+    if not Config.LiteHit then return end
+    local character = LocalPlayer.Character
+    local localHRP = character and character:FindFirstChild("HumanoidRootPart")
+    if not localHRP then return end
+    
+    local targetPlayer = GetClosestPlayer(6)
+    local targetHRP = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    
+    if targetHRP then
+        local oldVelocity = localHRP.AssemblyLinearVelocity
+        local direction = (targetHRP.Position - localHRP.Position).Unit
+        local flingForce = direction * 6000 + Vector3.new(0, 2500, 0)
+        
+        localHRP.AssemblyLinearVelocity = flingForce
+        task.wait(0.04)
+        if localHRP then
+            localHRP.AssemblyLinearVelocity = oldVelocity
+        end
+    end
+end)
+
+-- 3. Автоматизация лазерного плаща
+RunService.Heartbeat:Connect(function()
+    if not Config.LaserCloak then return end
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local cloak = character:FindFirstChild("Laser Cloak") or character:FindFirstChild("Лазерный плащ") or 
+                  LocalPlayer.Backpack:FindFirstChild("Laser Cloak") or LocalPlayer.Backpack:FindFirstChild("Лазерный плащ")
+                  
+    if cloak then
+        if cloak.Parent == LocalPlayer.Backpack then
+            cloak.Parent = character
+        end
+        cloak:Activate()
+    end
+end)
+
+-- 4. Мгновенная эвакуация груза (Instant Steal)
+local teleportsGuard = false
+RunService.Heartbeat:Connect(function()
+    if not Config.InstantSteal or teleportsGuard then return end
+    local character = LocalPlayer.Character
+    local localHRP = character and character:FindFirstChild("HumanoidRootPart")
+    if not localHRP then return end
+    
+    -- Проверка удержания Брейнрота в манипуляторах
+    local activeTool = character:FindFirstChildOfClass("Tool")
+    local holdingBrainrot = activeTool and (string.find(string.lower(activeTool.Name), "brain") or string.find(string.lower(activeTool.Name), "rot"))
+    
+    if holdingBrainrot then
+        -- Поиск CollectZone принадлежащей Оператору
+        local targetZone = nil
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if v.Name == "CollectZone" and v:IsA("BasePart") then
+                local rootBase = v.Parent
+                local isMatch = false
+                if rootBase then
+                    if string.find(string.lower(rootBase.Name), string.lower(LocalPlayer.Name)) or 
+                       (rootBase:FindFirstChild("Owner") and rootBase.Owner.Value == LocalPlayer) or
+                       (rootBase.Parent and rootBase.Parent:FindFirstChild("Owner") and rootBase.Parent.Owner.Value == LocalPlayer) then
+                        isMatch = true
+                    end
+                end
+                if isMatch then
+                    targetZone = v
+                    break
+                end
+            end
+        end
+        
+        if targetZone then
+            teleportsGuard = true
+            task.wait(Config.StealDelay) -- Задержка по ползунку
+            if localHRP and targetZone then
+                localHRP.CFrame = targetZone.CFrame + Vector3.new(0, 3, 0)
+            end
+            task.wait(0.5) -- Окно кулдауна для предотвращения софтлока
+            teleportsGuard = false
+        end
+    end
+end)
+
+-- МОДУЛЬ ВИЗУАЛИЗАЦИИ ДАННЫХ ОКРУЖЕНИЯ (ESP)
+
+local function ClearESPGroup(groupName)
+    for _, item in ipairs(ESP_Cache[groupName]) do
+        if item then item:Destroy() end
+    end
+    ESP_Cache[groupName] = {}
+end
+
+local function UpdateESP()
+    -- Игроки
+    if Config.ESP_Players then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local id = player.Name
+                if not ESP_Cache.Players[id] or not ESP_Cache.Players[id].Parent then
+                    local highlight = Instance.new("Highlight")
+                    highlight.FillColor = Color3.fromRGB(240, 50, 50)
+                    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                    highlight.FillTransparency = 0.6
+                    highlight.Adornee = player.Character
+                    highlight.Parent = targetGui
+                    ESP_Cache.Players[id] = highlight
+                end
+            end
+        end
+    else
+        ClearESPGroup("Players")
+    end
+
+    -- Анализ лучшего Брейнрота (Доход в секунду)
+    if Config.ESP_Brainrots then
+        ClearESPGroup("Brainrots")
+        local bestTarget = nil
+        local maxIncome = -1
+        
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("Model") or obj:IsA("BasePart") then
+                local name = string.lower(obj.Name)
+                if string.find(name, "brainrot") or string.find(name, "income") or obj:FindFirstChild("Income") then
+                    local currentIncome = 0
+                    local incVal = obj:FindFirstChild("Income") or obj:FindFirstChild("PerSecond") or obj:GetAttribute("Income")
+                    
+                    if incVal then
+                        currentIncome = tonumber(incVal:IsA("ValueBase") and incVal.Value or incVal) or 0
+                    else
+                        -- Парсинг из внутренних интерфейсов модели
+                        for _, sub in ipairs(obj:GetDescendants()) do
+                            if sub:IsA("TextLabel") then
+                                local num = string.match(sub.Text, "%d+")
+                                if num then currentIncome = tonumber(num) or 0 break end
+                            end
+                        end
+                    end
+                    
+                    if currentIncome > maxIncome then
+                        maxIncome = currentIncome
+                        bestTarget = obj
+                    end
+                end
+            end
+        end
+        
+        if bestTarget then
+            local billboard = Instance.new("BillboardGui")
+            billboard.Size = UDim2.new(0, 160, 0, 40)
+            billboard.AlwaysOnTop = true
+            billboard.ExtentsOffset = Vector3.new(0, 4, 0)
+            billboard.Adornee = bestTarget
+            
+            local label = Instance.new("TextLabel")
+            label.Size = UDim2.new(1, 0, 1, 0)
+            label.BackgroundTransparency = 1
+            label.Text = "[⭐ BEST BRAINROT: " .. tostring(maxIncome) .. "/s]"
+            label.TextColor3 = Color3.fromRGB(255, 200, 0)
+            label.Font = Enum.Font.Code
+            label.TextSize = 11
+            label.Parent = billboard
+            
+            billboard.Parent = targetGui
+            table.insert(ESP_Cache.Brainrots, billboard)
+        end
+    else
+        ClearESPGroup("Brainrots")
+    end
+
+    -- Базы (Таймеры блокировок)
+    if Config.ESP_Bases then
+        ClearESPGroup("Bases")
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("Model") and (string.find(string.lower(obj.Name), "base") or string.find(string.lower(obj.Name), "база") or string.find(string.lower(obj.Name), "tycoon")) then
+                local lockTime = "ACTIVE"
+                local lockObj = obj:FindFirstChild("Lock", true)
+                
+                if lockObj then
+                    local label = lockObj:IsA("TextLabel") and lockObj or lockObj:FindFirstChildOfClass("TextLabel", true)
+                    if label then
+                        lockTime = label.Text
+                    else
+                        local val = lockObj:FindFirstChild("Time") or lockObj:FindFirstChild("Timer")
+                        if val then lockTime = tostring(val.Value) end
+                    end
+                end
+                
+                local billboard = Instance.new("BillboardGui")
+                billboard.Size = UDim2.new(0, 140, 0, 40)
+                billboard.AlwaysOnTop = true
+                billboard.ExtentsOffset = Vector3.new(0, 6, 0)
+                billboard.Adornee = obj
+                
+                local label = Instance.new("TextLabel")
+                label.Size = UDim2.new(1, 0, 1, 0)
+                label.BackgroundTransparency = 1
+                label.Text = "[🔒 BASE // LOCK: " .. lockTime .. "]"
+                label.TextColor3 = Color3.fromRGB(0, 180, 255)
+                label.Font = Enum.Font.Code
+                label.TextSize = 10
+                label.Parent = billboard
+                
+                billboard.Parent = targetGui
+                table.insert(ESP_Cache.Bases, billboard)
+            end
+        end
+    else
+        ClearESPGroup("Bases")
+    end
+end
+
+task.spawn(function()
+    while true do
+        UpdateESP()
+        task.wait(1)
+    end
+end)
+
+
+-- ПРОЕКТИРОВАНИЕ ВЕРТИКАЛЬНОГО ИНТЕРФЕЙСА VERTEXHUB
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "VERTEXHUB_Terminal"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = targetGui
+
+-- Сферический (круглый) триггер вызова меню
+local OpenButton = Instance.new("TextButton")
+OpenButton.Name = "Trigger"
+OpenButton.Size = UDim2.new(0, 55, 0, 55)
+OpenButton.Position = UDim2.new(0.03, 0, 0.4, 0)
+OpenButton.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+OpenButton.BorderColor3 = Color3.fromRGB(0, 255, 150)
+OpenButton.BorderSizePixel = 2
+OpenButton.Text = "VX"
+OpenButton.TextColor3 = Color3.fromRGB(0, 255, 150)
+OpenButton.Font = Enum.Font.Code
+OpenButton.TextSize = 14
+OpenButton.Visible = false
+OpenButton.Active = true
+OpenButton.Draggable = true
+OpenButton.Parent = ScreenGui
+
+local RoundCorner = Instance.new("UICorner")
+RoundCorner.CornerRadius = UDim.new(1, 0) -- Обеспечение строгой круглой формы кнопки
+RoundCorner.Parent = OpenButton
+
+-- Главное вертикальное окно управления
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 210, 0, 390)
+MainFrame.Position = UDim2.new(0.5, -105, 0.5, -195)
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
+MainFrame.BorderColor3 = Color3.fromRGB(35, 35, 40)
+MainFrame.BorderSizePixel = 1
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local FrameCorner = Instance.new("UICorner")
+FrameCorner.CornerRadius = UDim.new(0, 4)
+FrameCorner.Parent = MainFrame
+
+-- Панель заголовка (Header)
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 35)
+Header.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0.7, 0, 1, 0)
+Title.Position = UDim2.new(0.06, 0, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "VERTEXHUB // OS"
+Title.TextColor3 = Color3.fromRGB(0, 255, 150)
+Title.Font = Enum.Font.Code
+Title.TextSize = 12
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
+
+-- Высококонтрастная кнопка закрытия
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 35, 0, 35)
+CloseButton.Position = UDim2.new(1, -35, 0, 0)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Text = "✕"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255) -- Исправлена видимость элемента
+CloseButton.Font = Enum.Font.Code
+CloseButton.TextSize = 14
+CloseButton.ZIndex = 10
+CloseButton.Parent = Header
+
+-- Вертикальная прокручиваемая лента опций (Scrolling Container)
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1, -16, 1, -45)
+ScrollFrame.Position = UDim2.new(0, 8, 0, 40)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 440)
+ScrollFrame.ScrollBarThickness = 2
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 255, 150)
+ScrollFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 7)
+UIListLayout.Parent = ScrollFrame
+
+-- Генератор кнопок-переключателей
+local function AddToggle(text, configKey)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -4, 0, 32)
+    btn.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+    btn.BorderColor3 = Color3.fromRGB(30, 30, 35)
+    btn.Text = text .. " [OFF]"
+    btn.TextColor3 = Color3.fromRGB(240, 70, 70)
+    btn.Font = Enum.Font.Code
+    btn.TextSize = 11
+    btn.Parent = ScrollFrame
+    
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 4)
+    c.Parent = btn
+    
+    btn.MouseButton1Click:Connect(function()
+        Config[configKey] = not Config[configKey]
+        if Config[configKey] then
+            btn.Text = text .. " [ON]"
+            btn.TextColor3 = Color3.fromRGB(0, 255, 150)
+            btn.BackgroundColor3 = Color3.fromRGB(16, 26, 20)
+            btn.BorderColor3 = Color3.fromRGB(0, 120, 70)
+        else
+            btn.Text = text .. " [OFF]"
+            btn.TextColor3 = Color3.fromRGB(240, 70, 70)
+            btn.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+            btn.BorderColor3 = Color3.fromRGB(30, 30, 35)
+        end
+        UpdateESP()
+    end)
+end
+
+-- Инициализация базовых переключателей в стек
+AddToggle("INF JUMP", "InfJump")
+AddToggle("FLING HIT (lLte-hit)", "LiteHit")
+AddToggle("LASER CLOAK", "LaserCloak")
+AddToggle("INSTANT STEAL", "InstantSteal")
+
+-- Интеграция слайдера задержки для Instant Steal
+local SliderContainer = Instance.new("Frame")
+SliderContainer.Size = UDim2.new(1, -4, 0, 45)
+SliderContainer.BackgroundTransparency = 1
+SliderContainer.Parent = ScrollFrame
+
+local SliderLabel = Instance.new("TextLabel")
+SliderLabel.Size = UDim2.new(1, 0, 0, 15)
+SliderLabel.BackgroundTransparency = 1
+SliderLabel.Text = "STEAL DELAY: 0.0s"
+SliderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+SliderLabel.Font = Enum.Font.Code
+SliderLabel.TextSize = 10
+SliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+SliderLabel.Parent = SliderContainer
+
+local SliderTrack = Instance.new("TextButton")
+SliderTrack.Size = UDim2.new(1, 0, 0, 6)
+SliderTrack.Position = UDim2.new(0, 0, 0.6, 0)
+SliderTrack.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+SliderTrack.Text = ""
+SliderTrack.AutoButtonColor = false
+SliderTrack.Parent = SliderContainer
+
+local SliderBar = Instance.new("Frame")
+SliderBar.Size = UDim2.new(0, 0, 1, 0)
+SliderBar.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
+SliderBar.BorderSizePixel = 0
+SliderBar.Parent = SliderTrack
+
+local isSliding = false
+local function HandleSlider()
+    local ratio = math.clamp((Mouse.X - SliderTrack.AbsolutePosition.X) / SliderTrack.AbsoluteSize.X, 0, 1)
+    local finalVal = math.round((ratio * 5) * 10) / 10 -- Шаг 0.1 секунды, макс 5 секунд
+    Config.StealDelay = finalVal
+    SliderBar.Size = UDim2.new(ratio, 0, 1, 0)
+    SliderLabel.Text = "STEAL DELAY: " .. string.format("%.1f", finalVal) .. "s"
+end
+
+SliderTrack.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        isSliding = true
+        HandleSlider()
+    end
+end)
+UserInputService.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        isSliding = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(inp)
+    if isSliding and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+        HandleSlider()
+    end
+end)
+
+-- Инициализация переключателей ESP в стек
+AddToggle("ESP PLAYERS", "ESP_Players")
+AddToggle("ESP BEST BRAINROT", "ESP_Brainrots")
+AddToggle("ESP BASES TIMERS", "ESP_Bases")
+
+-- ЛОГИКА АНИМАЦИИ И ТРАНСФОРМАЦИИ ИНТЕРФЕЙСА
+
+local defaultSize = UDim2.new(0, 210, 0, 390)
+local minimizedSize = UDim2.new(0, 210, 0, 0)
+
+CloseButton.MouseButton1Click:Connect(function()
+    local closeTween = TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Size = minimizedSize})
+    closeTween:Play()
+    closeTween.Completed:Connect(function()
+        MainFrame.Visible = false
+        OpenButton.Visible = true
+    end)
+end)
+
+OpenButton.MouseButton1Click:Connect(function()
+    OpenButton.Visible = false
+    MainFrame.Visible = true
+    MainFrame.Size = minimizedSize
+    TweenService:Create(MainFrame, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = defaultSize}):Play()
+end)
