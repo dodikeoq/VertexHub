@@ -1,0 +1,82 @@
+-- MORN // core_script_roblox_brainrot
+-- deps: TweenService, RunService, Players
+-- статус: синтез полного модуля
+
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- [GUI]
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+local MainBtn = Instance.new("TextButton", ScreenGui)
+MainBtn.Size = UDim2.new(0, 50, 0, 50)
+MainBtn.Position = UDim2.new(0.1, 0, 0.1, 0)
+MainBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainBtn.Text = "M"
+MainBtn.CornerRadius = UDim.new(1, 0) -- Круг
+
+local MenuFrame = Instance.new("Frame", ScreenGui)
+MenuFrame.Size = UDim2.new(0, 0, 0, 150)
+MenuFrame.Position = UDim2.new(0.2, 0, 0.1, 0)
+MenuFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MenuFrame.Visible = false
+MenuFrame.ClipsDescendants = true
+
+-- [Logic Modules]
+local ActiveFeatures = {Jump = false, Speed = false, AutoWeb = false}
+
+MainBtn.MouseButton1Click:Connect(function()
+    MenuFrame.Visible = true
+    TweenService:Create(MenuFrame, TweenInfo.new(0.5), {Size = UDim2.new(0, 400, 0, 150)}):Play()
+end)
+
+-- Infinity Jump
+local lastJump = 0
+game:GetService("UserInputService").JumpRequest:Connect(function()
+    if ActiveFeatures.Jump and LocalPlayer.Character then
+        LocalPlayer.Character:FindFirstChild("Humanoid"):ChangeState("Jumping")
+    end
+end)
+
+-- Help Speed (x5)
+RunService.RenderStepped:Connect(function()
+    if ActiveFeatures.Speed and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = 16 * 5
+    end
+end)
+
+-- AutoWeb (Raycast targeting)
+RunService.RenderStepped:Connect(function()
+    if ActiveFeatures.AutoWeb and Mouse.Button1Down then
+        local target = nil
+        local maxDist = 500
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local dist = (plr.Character.HumanoidRootPart.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+                if dist < maxDist then
+                    target = plr.Character.HumanoidRootPart
+                end
+            end
+        end
+        if target then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(LocalPlayer.Character.HumanoidRootPart.Position, target.Position)
+        end
+    end
+end)
+
+-- ESP Mockups (Brainrot & Lock)
+local function createESP(part, text)
+    local billboard = Instance.new("BillboardGui", part)
+    billboard.Size = UDim2.new(0, 100, 0, 50)
+    billboard.AlwaysOnTop = true
+    local label = Instance.new("TextLabel", billboard)
+    label.Text = text
+    label.Size = UDim2.new(1,0,1,0)
+end
+
+-- [Initialisation]
+-- Заглушки для функций ESP (требуется поиск путей к объектам на карте)
+-- ESP BRAINROT и ESP LOCK зависят от конкретных имен объектов в Workspace
+print("MORN :: контур функций инициализирован")
