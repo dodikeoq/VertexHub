@@ -1,0 +1,255 @@
+-- узел: meridian/roblox_booster
+-- среда: Delta Executor / Roblox Lua
+-- параметры: Малиновый интерфейс (Crimson Theme), Оптимизация производительности
+
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local Terrain = game:GetService("Workspace"):FindFirstChildOfClass("Terrain")
+
+local LocalPlayer = Players.LocalPlayer
+local CoreGui = game:GetService("CoreGui")
+
+-- Уничтожение старой сессии интерфейса, если она существовала
+if CoreGui:FindFirstChild("MornStation_UI") then
+    CoreGui:FindFirstChild("MornStation_UI"):Destroy()
+end
+
+-- Создание корневого контейнера
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MornStation_UI"
+ScreenGui.Parent = CoreGui
+ScreenGui.ResetOnSpawn = false
+
+-- Глобальные переменные состояния функций
+local State = {
+    InfJump = 0, -- 0 = Выкл, >0 = Сила прыжка
+    LowPotato = 0,
+    BoostFps = 0
+}
+
+-- Создание круглой кнопки вызова (R)
+local MainButton = Instance.new("TextButton")
+local ButtonCorner = Instance.new("UICorner")
+
+MainButton.Name = "TriggerButton"
+MainButton.Size = UDim2.new(0, 50, 0, 50)
+MainButton.Position = UDim2.new(0, 20, 0.5, -25)
+MainButton.BackgroundColor3 = Color3.fromRGB(220, 20, 60) -- Малиновый
+MainButton.Text = "R"
+MainButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MainButton.TextSize = 24
+MainButton.Font = Enum.Font.SourceSansBold
+MainButton.Active = true
+MainButton.Draggable = true
+MainButton.Parent = ScreenGui
+
+ButtonCorner.CornerRadius = UDim.new(1, 0)
+ButtonCorner.Parent = MainButton
+
+-- Создание главного вертикального окна
+local MainFrame = Instance.new("Frame")
+local FrameCorner = Instance.new("UICorner")
+local UIListLayout = Instance.new("UIListLayout")
+local Title = Instance.new("TextLabel")
+
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 220, 0, 320)
+MainFrame.Position = UDim2.new(0, 80, 0.5, -160)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
+MainFrame.Parent = ScreenGui
+
+FrameCorner.CornerRadius = UDim.new(0, 8)
+FrameCorner.Parent = MainFrame
+
+-- Заголовок меню
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+Title.Text = "  MORN // Systems"
+Title.TextColor3 = Color3.fromRGB(220, 20, 60)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 16
+Title.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = Title
+
+-- Скролл-контейнер для элементов управления
+local ContentScroll = Instance.new("ScrollingFrame")
+ContentScroll.Size = UDim2.new(1, 0, 1, -35)
+ContentScroll.Position = UDim2.new(0, 0, 0, 35)
+ContentScroll.BackgroundTransparency = 1
+ContentScroll.CanvasSize = UDim2.new(0, 0, 0, 380)
+ContentScroll.ScrollBarThickness = 4
+ContentScroll.Parent = MainFrame
+
+UIListLayout.Parent = ContentScroll
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 8)
+
+-- Функция создания меток разделов
+local function createSectionTitle(text, order)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -10, 0, 25)
+    label.BackgroundTransparency = 1
+    label.Text = "  " .. text
+    label.TextColor3 = Color3.fromRGB(150, 150, 150)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 14
+    label.LayoutOrder = order
+    label.Parent = ContentScroll
+end
+
+-- Универсальная функция создания ползунка (Переключатель/Ползунок 0-100)
+local function createSlider(name, min, max, order, callback)
+    local sliderFrame = Instance.new("Frame")
+    local sliderLabel = Instance.new("TextLabel")
+    local sliderBtn = Instance.new("TextButton")
+    local sliderProgress = Instance.new("Frame")
+    
+    sliderFrame.Size = UDim2.new(1, -16, 0, 45)
+    sliderFrame.BackgroundTransparency = 1
+    sliderFrame.LayoutOrder = order
+    sliderFrame.Parent = ContentScroll
+    
+    sliderLabel.Size = UDim2.new(1, 0, 0, 20)
+    sliderLabel.BackgroundTransparency = 1
+    sliderLabel.Text = "  " .. name .. ": " .. min
+    sliderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+    sliderLabel.Font = Enum.Font.SourceSans
+    sliderLabel.TextSize = 14
+    sliderLabel.Parent = sliderFrame
+    
+    sliderBtn.Size = UDim2.new(1, -10, 0, 12)
+    sliderBtn.Position = UDim2.new(0, 5, 0, 22)
+    sliderBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    sliderBtn.Text = ""
+    sliderBtn.Parent = sliderFrame
+    
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 4)
+    sliderCorner.Parent = sliderBtn
+    
+    sliderProgress.Size = UDim2.new(0, 0, 1, 0)
+    sliderProgress.BackgroundColor3 = Color3.fromRGB(220, 20, 60)
+    sliderProgress.Parent = sliderBtn
+    
+    local progressCorner = Instance.new("UICorner")
+    progressCorner.CornerRadius = UDim.new(0, 4)
+    progressCorner.Parent = sliderProgress
+    
+    local function updateSlider(input)
+        local pos = math.clamp((input.Position.X - sliderBtn.AbsolutePosition.X) / sliderBtn.AbsoluteSize.X, 0, 1)
+        sliderProgress.Size = UDim2.new(pos, 0, 1, 0)
+        local value = math.floor(min + (max - min) * pos)
+        sliderLabel.Text = "  " .. name .. ": " .. tostring(value)
+        callback(value)
+    end
+    
+    local dragging = false
+    sliderBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateSlider(input)
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateSlider(input)
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+-- Логика скрытия/открытия меню
+MainButton.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+--- =======================================================
+--- НАСТРОЙКА ФУНКЦИОНАЛА СТАНЦИИ
+--- =======================================================
+
+-- Раздел: Main
+createSectionTitle("MAIN", 1)
+
+-- Функция Infinity Jump с безопасным обходом античит-систем
+createSlider("Infinity Jump", 0, 100, 2, function(val)
+    State.InfJump = val
+end)
+
+UserInputService.JumpRequest:Connect(function()
+    if State.InfJump > 0 then
+        local Character = LocalPlayer.Character
+        if Character then
+            local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+            local RootPart = Character:FindFirstChild("HumanoidRootPart")
+            
+            if Humanoid and RootPart then
+                -- Безопасный сброс состояния падения без жесткого изменения координат во избежание детекта
+                Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                -- Плавный импульс вверх, имитирующий легитимный физический прыжок
+                RootPart.Velocity = Vector3.new(RootPart.Velocity.X, State.InfJump, RootPart.Velocity.Z)
+            end
+        end
+    end
+end)
+
+-- Раздел: Optimization
+createSectionTitle("OPTIMIZATION", 3)
+
+-- Функция LowPotato: Сжатие геометрии, отключение материалов
+createSlider("LowPotato", 0, 1, 4, function(val)
+    State.LowPotato = val
+    if val == 1 then
+        if Terrain then
+            Terrain.WaterWaveSize = 0
+            Terrain.WaterWaveSpeed = 0
+            Terrain.WaterReflectance = 0
+            Terrain.WaterTransparency = 0
+        end
+        for _, obj in ipairs(game:GetDescendants()) do
+            if obj:IsA("Part") or obj:IsA("CornerWedgePart") or obj:IsA("TrussPart") or obj:IsA("WedgePart") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+            elseif obj:IsA("MeshPart") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+            end
+        end
+    end
+end)
+
+-- Функция BoostFps: Агрессивное отключение тяжелых эффектов постобработки
+createSlider("BoostFps", 0, 1, 5, function(val)
+    State.BoostFps = val
+    if val == 1 then
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        
+        for _, effect in ipairs(Lighting:GetChildren()) do
+            if effect:IsA("BloomEffect") or effect:IsA("BlurEffect") or effect:IsA("DepthOfFieldEffect") or effect:IsA("SunRaysEffect") then
+                effect.Enabled = false
+            end
+        end
+        
+        for _, obj in ipairs(game:GetDescendants()) do
+            if obj:IsA("Texture") or obj:IsA("Decal") then
+                obj:Destroy() -- Удаление текстур для высвобождения VRAM
+            end
+        end
+    end
+end)
